@@ -34,6 +34,69 @@
 type bigstring =
   (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
 
+type input_descr =
+  { length      : int
+  ; get         : int -> char
+  ; substring   : int -> int -> string }
+
+let input_descr_of_string s =
+  { length    = String.length s
+  ; get       = (fun pos     -> String.unsafe_get s pos)
+  ; substring = (fun pos len -> String.sub s pos len) }
+
+let input_descr_of_bigstring b =
+  { length    = Bigarray.Array1.dim b
+  ; get       = (fun pos     -> Bigarray.Array1.unsafe_get b pos)
+  ; substring = (fun pos len ->
+      Cstruct.to_string (Cstruct.of_bigarray ~off:pos ~len b)) }
+
+module State = struct
+  type t =
+    { mutable commit_pos : int
+    ; initial_commit_pos : int
+    ; length    : int
+    ; get       : int -> char
+    ; substring : int -> int -> string }
+
+  let create initial_commit_pos (input:input_descr) =
+    { commit_pos = initial_commit_pos
+    ; initial_commit_pos
+    ; length    = input.length
+    ; get       = input.get
+    ; substring = input.substring }
+
+  let length { initial_commit_pos; length }  =
+    length + initial_commit_pos
+
+  let initial_commit_pos t =
+    t.initial_commit_pos
+
+  let commit_pos { commit_pos } =
+    commit_pos
+
+  let committed_bytes { commit_pos; initial_commit_pos } =
+    commit_pos - initial_commit_pos
+
+  let uncommitted_bytes { length; commit_pos }  =
+    length - commit_pos
+
+  let commit t pos =
+    t.commit_pos <- pos
+
+  let substring { substring; initial_commit_pos } pos len =
+    let pos = pos - initial_commit_pos in
+    substring pos len
+
+  let get { get; initial_commit_pos } pos =
+    let pos = pos - initial_commit_pos in
+    get pos
+
+  let count_while { length; get; initial_commit_pos } pos f =
+    let i = ref (pos - initial_commit_pos) in
+    while !i < length && f (get !i) do incr i; done;
+    !i - (pos - initial_commit_pos)
+end
+
 type input =
   [ `String    of string
   | `Bigstring of bigstring ]
@@ -43,6 +106,12 @@ let input_length input =
   | `String s    -> String.length s
   | `Bigstring b -> Bigarray.Array1.dim b
 
+let input_descr_of_input input =
+  match input with
+  | `String s -> input_descr_of_string s
+  | `Bigstring b -> input_descr_of_bigstring b
+
+  (*
 module Input = struct
   type t =
     { mutable commit_pos : int
@@ -99,6 +168,7 @@ module Input = struct
     t.commit_pos <- pos
 
 end
+*)
 
 type _unconsumed =
   { buffer : bigstring
@@ -202,13 +272,13 @@ module Unbuffered = struct
     ; continue  : input -> more -> 'a state }
 
   type 'a with_input =
-    Input.t ->  int -> more -> 'a
+    State.t ->  int -> more -> 'a
 
   type 'a failure = (string list -> string -> 'a state) with_input
   type ('a, 'r) success = ('a -> 'r state) with_input
 
   let fail_k    buf pos _ marks msg = Fail(marks, msg)
-  let succeed_k buf pos _       v   = Done(v, pos - Input.initial_commit_pos buf)
+  let succeed_k buf pos _       v   = Done(v, pos - State.initial_commit_pos buf)
 
   type 'a t =
     { run : 'r. ('r failure -> ('a, 'r) success -> 'r state) with_input }
@@ -226,10 +296,12 @@ module Unbuffered = struct
     | Fail (marks, err) -> Result.Error (fail_to_string marks err)
 
   let parse ?(input=`String "") p =
-    p.run (Input.create 0 input) 0 Incomplete fail_k succeed_k
+    let input_descr = input_descr_of_input input in
+    p.run (State.create 0 input_descr) 0 Incomplete fail_k succeed_k
 
   let parse_only p input =
-    state_to_result (p.run (Input.create 0 input) 0 Complete fail_k succeed_k)
+    let input_descr = input_descr_of_input input in
+    state_to_result (p.run (State.create 0 input_descr) 0 Complete fail_k succeed_k)
 end
 
 type more = Unbuffered.more =
@@ -419,7 +491,7 @@ let (<|>) p q =
        * of the committed input, then calling the failure continuation will
        * have the effect of unwinding all choices and collecting marks along
        * the way. *)
-      if pos < Input.commit_pos input' then
+      if pos < State.commit_pos input' then
         fail input' pos' more marks msg
       else
         q.run input' pos more' fail succ in
@@ -428,24 +500,24 @@ let (<|>) p q =
 
 (** BEGIN: getting input *)
 
-let rec prompt input pos fail succ =
-  let uncommitted_bytes = Input.uncommitted_bytes input in
-  let commit_pos        = Input.commit_pos input in
+let rec prompt state pos fail succ =
+  let uncommitted_bytes = State.uncommitted_bytes state in
+  let commit_pos        = State.commit_pos state in
   (* The continuation should not hold any references to input above. *)
   let continue input more =
-    let length = input_length input in
-    if length < uncommitted_bytes then
+    let input_descr = input_descr_of_input input in
+    if input_descr.length < uncommitted_bytes then
       failwith "prompt: input shrunk!";
-    let input = Input.create commit_pos input in
-    if length = uncommitted_bytes then
+    let state = State.create commit_pos input_descr in
+    if input_descr.length = uncommitted_bytes then
       if more = Complete then
-        fail input pos Complete
+        fail state pos Complete
       else
-        prompt input pos fail succ
+        prompt state pos fail succ
     else
-      succ input pos more
+      succ state pos more
   in
-  Partial { committed = Input.committed_bytes input; continue }
+  Partial { committed = State.committed_bytes state; continue }
 
 let demand_input =
   { run = fun input pos more fail succ ->
@@ -459,7 +531,7 @@ let demand_input =
 
 let want_input =
   { run = fun input pos more _fail succ ->
-    if pos < Input.length input then
+    if pos < State.length input then
       succ input pos more true
     else if more = Complete then
       succ input pos more false
@@ -472,7 +544,7 @@ let want_input =
 let ensure_suspended n input pos more fail succ =
   let rec go =
     { run = fun input' pos' more' fail' succ' ->
-      if pos' + n <= Input.length input' then
+      if pos' + n <= State.length input' then
         succ' input' pos' more' ()
       else
         (demand_input *> go).run input' pos' more' fail' succ'
@@ -482,12 +554,12 @@ let ensure_suspended n input pos more fail succ =
 
 let unsafe_substring n =
   { run = fun input pos more fail succ ->
-    succ input (pos + n) more (Input.substring input pos n)
+    succ input (pos + n) more (State.substring input pos n)
   }
 
 let ensure n =
   { run = fun input pos more fail succ ->
-    if pos + n <= Input.length input then
+    if pos + n <= State.length input then
       succ input pos more ()
     else
       ensure_suspended n input pos more fail succ
@@ -499,7 +571,7 @@ let ensure n =
 
 let end_of_input =
   { run = fun input pos more fail succ ->
-    if pos < Input.length input then
+    if pos < State.length input then
       fail input pos more [] "end_of_input"
     else if more = Complete then
       succ input pos more ()
@@ -517,7 +589,7 @@ let pos =
 
 let available =
   { run = fun input pos more _fail succ ->
-    succ input pos more (Input.length input - pos)
+    succ input pos more (State.length input - pos)
   }
 
 let get_buffer_and_pos =
@@ -525,7 +597,7 @@ let get_buffer_and_pos =
 
 let commit =
   { run = fun input pos more _fail succ ->
-    Input.commit input pos;
+    State.commit input pos;
     succ input pos more () }
 
 (* Do not use this if [p] contains a [commit]. *)
@@ -536,13 +608,13 @@ let unsafe_lookahead p =
 
 let peek_char =
   { run = fun input pos more fail succ ->
-    if pos < Input.length input then
-      succ input pos more (Some (Input.get input pos))
+    if pos < State.length input then
+      succ input pos more (Some (State.get input pos))
     else if more = Complete then
       succ input pos more None
     else
       let succ' input' pos' more' =
-        succ input' pos' more' (Some (Input.get input' pos'))
+        succ input' pos' more' (Some (State.get input' pos'))
       and fail' input' pos' more' =
         succ input' pos' more' None in
       prompt input pos fail' succ'
@@ -550,13 +622,13 @@ let peek_char =
 
 let _char ~msg f =
   { run = fun input pos more fail succ ->
-    if pos < Input.length input then
-      match f (Input.get input pos) with
+    if pos < State.length input then
+      match f (State.get input pos) with
       | None   -> fail input pos more [] msg
       | Some v -> succ input (pos + 1) more v
     else
       let succ' input' pos' more' () =
-        match f (Input.get input' pos') with
+        match f (State.get input' pos') with
         | None   -> fail input' pos' more' [] msg
         | Some v -> succ input' (pos' + 1) more' v
       in
@@ -585,11 +657,11 @@ let count_while ?(init=0) f =
   (* NB: does not advance position. *)
   let rec go acc =
     { run = fun input pos more fail succ ->
-      let n = Input.count_while input (pos + acc) f in
+      let n = State.count_while input (pos + acc) f in
       let acc' = n + acc in
       (* Check if the loop terminated because it reached the end of the input
        * buffer. If so, then prompt for additional input and continue. *)
-      if pos + acc' < Input.length input || more = Complete then
+      if pos + acc' < State.length input || more = Complete then
         succ input pos more acc'
       else
         let succ' input' pos' more' = (go acc').run input' pos' more' fail succ
