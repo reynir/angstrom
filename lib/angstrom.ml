@@ -595,6 +595,9 @@ let count n p =
   in
   loop n
 
+let count_array n p =
+  count n p >>| Array.of_list
+
 let many p =
   fix (fun m ->
     (lift2 cons p m) <|> return [])

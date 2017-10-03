@@ -212,6 +212,9 @@ val list : 'a t list -> 'a list t
 val count : int -> 'a t -> 'a list t
 (** [count n p] runs [p] [n] times, returning a list of the results. *)
 
+val count_array : int -> 'a t -> 'a array t
+(** [count n p] runs [p] [n] times, returning an array of the results. *)
+
 val many : 'a t -> 'a list t
 (** [many p] runs [p] {i zero} or more times and returns a list of results from
     the runs of [p]. *)
