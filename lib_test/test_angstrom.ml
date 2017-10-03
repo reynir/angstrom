@@ -56,6 +56,7 @@ let check_fail ?size ~msg p is =
 
 let check_c   ?size ~msg p is r = check_ok ?size ~msg Alcotest.char            p is r
 let check_lc  ?size ~msg p is r = check_ok ?size ~msg Alcotest.(list char)     p is r
+let check_ac  ?size ~msg p is r = check_ok ?size ~msg Alcotest.(array char)    p is r
 let check_co  ?size ~msg p is r = check_ok ?size ~msg Alcotest.(option char)   p is r
 let check_s   ?size ~msg p is r = check_ok ?size ~msg Alcotest.string          p is r
 let check_ls  ?size ~msg p is r = check_ok ?size ~msg Alcotest.(list string)   p is r
@@ -311,6 +312,12 @@ let combinators =
       check_lc ~msg:"exact input" (count 1 (char 'a')) ["a"] ['a'];
       check_lc ~msg:"additonal input" (count 2 (char 'a')) ["aaa"] ['a'; 'a'];
       check_fail ~msg:"bad input" (count 2 (char 'a')) ["abb"];
+    end
+  ; "count_array", `Quick, begin fun () ->
+      check_ac ~msg:"empty input" (count_array 0 (char 'a')) [""] [||];
+      check_ac ~msg:"exact input" (count_array 1 (char 'a')) ["a"] [|'a'|];
+      check_ac ~msg:"additonal input" (count_array 2 (char 'a')) ["aaa"] [|'a'; 'a'|];
+      check_fail ~msg:"bad input" (count_array 2 (char 'a')) ["abb"];
     end
   ; "scan_state", `Quick, begin fun () ->
       check_s ~msg:"scan_state" (scan_state "" (fun s -> function
