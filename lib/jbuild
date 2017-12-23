@@ -6,7 +6,6 @@
   (libraries
     (bigarray
      result))
-  (c_names (bigstring_stubs))
   (js_of_ocaml (
     (javascript_files (runtime.js))
     ))
