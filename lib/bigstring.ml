@@ -12,14 +12,22 @@ let length t = BA1.dim t
 let unsafe_get = BA1.unsafe_get
 let unsafe_set = BA1.unsafe_set
 
-external blit            : t       -> int -> t       -> int -> int -> unit =
-  "angstrom_bigstring_blit_to_bigstring" [@@noalloc]
+let blit src src_off dst dst_off len =
+  let src' = Bigarray.Array1.sub src src_off len in
+  let dst' = Bigarray.Array1.sub dst dst_off len in
+  Bigarray.Array1.blit src' dst'
 
-external blit_to_bytes   : t       -> int -> Bytes.t -> int -> int -> unit =
-  "angstrom_bigstring_blit_to_bytes"     [@@noalloc]
+(* FIXME: check bounds, see if there's a better way *)
+let blit_to_bytes src src_off dst dst_off len =
+  for i = 0 to len - 1 do
+    dst.[dst_off + i] <- Bigarray.Array1.get src (src_off + i)
+  done
 
-external blit_from_bytes : Bytes.t -> int -> t       -> int -> int -> unit =
-  "angstrom_bigstring_blit_from_bytes"   [@@noalloc]
+(* FIXME: check bounds, better way *)
+let blit_from_bytes src src_off dst dst_off len =
+  for i = 0 to len - 1 do
+    Bigarray.Array1.set dst (dst_off + i) src.[src_off + i]
+  done
 
 let blit_from_string src src_off dst dst_off len =
   blit_from_bytes (Bytes.unsafe_of_string src) src_off dst dst_off len
