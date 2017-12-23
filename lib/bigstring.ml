@@ -20,7 +20,7 @@ let blit src src_off dst dst_off len =
 (* FIXME: check bounds, see if there's a better way *)
 let blit_to_bytes src src_off dst dst_off len =
   for i = 0 to len - 1 do
-    dst.[dst_off + i] <- Bigarray.Array1.get src (src_off + i)
+    Bytes.set dst (dst_off + i) (Bigarray.Array1.get src (src_off + i))
   done
 
 (* FIXME: check bounds, better way *)
