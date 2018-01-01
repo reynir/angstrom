@@ -16,11 +16,11 @@ let bigarray_spec sz =
   Memcpy.bigarray Ctypes.array1 sz Bigarray.char
 
 let blit src src_off dst dst_off len =
-  Memcpy.memcpy (bigarray_spec (BA1.size_in_bytes src)) (bigarray_spec (BA1.size_in_bytes dst))
+  Memcpy.unsafe_memcpy (bigarray_spec (BA1.size_in_bytes src)) (bigarray_spec (BA1.size_in_bytes dst))
     ~src ~dst ~src_off ~dst_off ~len
 
 let blit_to_bytes src src_off dst dst_off len =
-  Memcpy.memcpy (bigarray_spec (BA1.size_in_bytes src)) Memcpy.ocaml_bytes
+  Memcpy.unsafe_memcpy (bigarray_spec (BA1.size_in_bytes src)) Memcpy.ocaml_bytes
     ~src ~dst ~src_off ~dst_off ~len
 
 let blit_from_bytes src src_off dst dst_off len =
