@@ -5,8 +5,8 @@
   (public_name angstrom)
   (libraries
     (bigarray
+     memcpy
      result))
-  (c_names (bigstring_stubs))
   (js_of_ocaml (
     (javascript_files (runtime.js))
     ))

@@ -12,14 +12,21 @@ let length t = BA1.dim t
 let unsafe_get = BA1.unsafe_get
 let unsafe_set = BA1.unsafe_set
 
-external blit            : t       -> int -> t       -> int -> int -> unit =
-  "angstrom_bigstring_blit_to_bigstring" [@@noalloc]
+let bigarray_spec sz =
+  Memcpy.bigarray Ctypes.array1 sz Bigarray.char
 
-external blit_to_bytes   : t       -> int -> Bytes.t -> int -> int -> unit =
-  "angstrom_bigstring_blit_to_bytes"     [@@noalloc]
+let blit src src_off dst dst_off len =
+  Memcpy.memcpy (bigarray_spec (BA1.size_in_bytes src)) (bigarray_spec (BA1.size_in_bytes dst))
+    ~src ~dst ~src_off ~dst_off ~len
 
-external blit_from_bytes : Bytes.t -> int -> t       -> int -> int -> unit =
-  "angstrom_bigstring_blit_from_bytes"   [@@noalloc]
+let blit_to_bytes src src_off dst dst_off len =
+  Memcpy.memcpy (bigarray_spec (BA1.size_in_bytes src)) Memcpy.ocaml_bytes
+    ~src ~dst ~src_off ~dst_off ~len
+
+let blit_from_bytes src src_off dst dst_off len =
+  let src = Bytes.sub src src_off len in
+  Memcpy.memcpy_from_bytes (bigarray_spec (BA1.size_in_bytes dst))
+    ~src ~dst ~dst_off
 
 let blit_from_string src src_off dst dst_off len =
   blit_from_bytes (Bytes.unsafe_of_string src) src_off dst dst_off len
